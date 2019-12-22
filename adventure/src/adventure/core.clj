@@ -106,15 +106,26 @@
 		(name (last inv)))) state
 	)))
 
-(defn take-item
-	[state]
-	(do (println "Inventory") state)
-	)
+(defn take-item [state item]
+	(let [inv (get-in state [:adventurer :inventory])
+		  location (get-in state [:adventurer :location])
+		  contents (get-in state [:map location :contents])
+          obj (contents item)]
+    (if (nil? obj)
+      (do (println "You don't have that.")
+          state)
+      (assoc-in (assoc-in state[:adventurer :inventory] (conj inv item)) [:map location :contents] (disj contents item)))))
 
-(defn drop-item
-	[state]
-	(do (println "Inventory") state)
-	)
+
+(defn drop-item [state item]
+	(let [inv (get-in state [:adventurer :inventory])
+		  location (get-in state [:adventurer :location])
+		  contents (get-in state [:map location :contents])
+          obj (inv item)]
+    (if (nil? obj)
+      (do (println "You don't have that.")
+          state)
+      (assoc-in (assoc-in state[:adventurer :inventory] (disj inv item)) [:map location :contents] (conj contents item)))))
 
 (defn single [state word]
 	(cond
@@ -280,7 +291,7 @@
    :grue-pen {:desc "It is very dark.  You are about to be eaten by a grue."
               :title "in the grue pen"
               :dir {:north :foyer}
-              :contents #{}}
+              :contents #{:raw-egg}}
    })
 
 (def init-adventurer
