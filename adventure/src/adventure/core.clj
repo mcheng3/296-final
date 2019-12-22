@@ -17,6 +17,29 @@
 ;; and a value containing a hash of the variables and
 ;; their values.
 
+(defn list-contents [state]
+	(let [location (get-in state [:adventurer :location])
+		inv (get-in state [:map location :contents])]
+		(if (empty? inv)
+		(do (println " This room doesn't have anything. ") state)
+		(do (println (str " This room has:")) (apply println  (conj (vec(map #(str % ",")(map name (butlast inv)))) 
+		(name (last inv)))) state
+	))))
+
+(defn status [state]
+  (let [location (get-in state [:adventurer :location])
+        the-map (:map state)]
+    (print (str "You are " (-> the-map location :title) ". "))
+    (when-not ((get-in state [:adventurer :seen]) location)
+      (do (print (-> the-map location :desc))  (list-contents state)))
+    (update-in state [:adventurer :seen] #(conj % location))))
+
+(defn describe-room [state]
+	  (let [location (get-in state [:adventurer :location])
+        the-map (:map state)]
+    (print (str "You are " (-> the-map location :title) ". "))
+      (do (print (-> the-map location :desc))  (list-contents state)))
+   )
 
 (defn post-increment
   "Action: post-increment
@@ -97,14 +120,21 @@
     (if (nil? dest)
       (do (println "You can't go that way.")
           state)
-      (update-in (assoc-in state [:adventurer :location] dest) [:adventurer :tick] inc))))
+      (if (nil? (get-in state [:map dest :key]))
+      	(update-in (assoc-in state [:adventurer :location] dest) [:adventurer :tick] inc)
+      	(if (nil? ((get-in state [:adventurer :inventory]) (get-in state [:map dest :key])))
+      		(do (println "This room is locked.") state)
+      		(update-in (assoc-in state [:adventurer :location] dest) [:adventurer :tick] inc))
+      	))))
 
 (defn list-inventory 
 	[state]
 	(let [inv (get-in state [:adventurer :inventory])]
-		(do (println (str "You have:")) (apply println  (conj (vec(map #(str % ",")(map name (butlast inv)))) 
-		(name (last inv)))) state
-	)))
+		(if (empty? inv)
+		(do (println "You don't have anything.") state)
+		(do (println (str "You have:")) (apply println  (conj (vec(map #(str % ",")(map #(get-in state [:items % :name]) (butlast inv)))) 
+		(get-in state [:items (last inv) :name]))) state
+	))))
 
 (defn take-item [state item]
 	(let [inv (get-in state [:adventurer :inventory])
@@ -112,7 +142,7 @@
 		  contents (get-in state [:map location :contents])
           obj (contents item)]
     (if (nil? obj)
-      (do (println "You don't have that.")
+      (do (println "This room doesn't have that.")
           state)
       (assoc-in (assoc-in state[:adventurer :inventory] (conj inv item)) [:map location :contents] (disj contents item)))))
 
@@ -134,6 +164,7 @@
 		(or (= word :west) (= word :w)) (go state :west) 
 		(or (= word :east) (= word :e)) (go state :east) 
 		(or (= word :inventory) (= word :i)) (list-inventory state)
+		(or (= word :look) (= word :examine)) (describe-room state)
 		(= word :quit) (System/exit 0)
 		:else (do (println "I don't know what you mean. ") state)
 		))
@@ -185,7 +216,61 @@
 ;; [{:objects {}} "What show?"]
 ;; </code></pre>
 
+(defn upgrade [state item]
+	  (let [inv (get-in state [:adventurer :inventory])
+          obj (inv item)
+          usb (inv :usb)]
+    (if (nil? obj)
+      (do (println "You don't have that.")
+          state)
+      (if (= (get-in state [:items obj :actions]) :upgrade)
+      	(if(nil? usb)
+      		(do (println "You need a Windows 10 upgrade flash drive.")
+          	state)
+      		(do (println "You upgraded your computer to Windows 10.") 
+      			(assoc-in state [:adventurer :inventory] (disj (conj inv :windows-10) obj))))
+      	(do (println "You can't upgrade that.")
+          state))
+      	)))
 
+(defn eat [state item]
+	   (let [inv (get-in state [:adventurer :inventory])
+          obj (inv item)
+          usb (inv :usb)]
+    (if (nil? obj)
+      (do (println "You don't have that.")
+          state)
+      (if (= (get-in state [:items obj :actions]) :eat)
+          (do (println "You ate. ") 
+      			(assoc-in state [:adventurer :inventory] (disj inv obj)))
+   
+      	(do (println "You can't eat that.")
+          state))
+      	)))
+
+(defn hack [state item]
+  (let [inv (get-in state [:adventurer :inventory])
+          obj (inv item)
+          usb (inv :usb)]
+    (if (nil? obj)
+      (do (println "You don't have that.")
+          state)
+      (if (= (get-in state [:items obj :actions]) :use)
+      	(cond
+      		(not= (get-in state [:adventurer :location]) :hacking-station) (do (println "You must be in the hacking station to hack") state)
+      		(= obj :windows-10) (do (println "You hacked the asteroid and saved mankind! Jim gives you 10 dollars as a reward. Go north to retrieve your cake.") 
+      			(assoc-in state [:adventurer :inventory] (conj inv :ten-dollars)))
+      		(or (= obj :windows-vista) (= obj :windows-xp)) (do (println "You must upgrade first ") state) 
+  
+      		(or (= obj :mac)) (do (println "The laptop explodes because it is a Mac. All of humanity dies.") (System/exit 0))
+      		)
+      	(do (println "You can't eat that.")
+          state))
+      	)))
+
+
+	
+		
 ;; # Action Environment
 ;;
 ;; The runtime environment is a vector of the form
@@ -199,7 +284,8 @@
 
 (def initial-env [  [:postinc "@"] post-increment ["@"] single 
 		[:go "@"] go [:describe "@"] describe-obj [:look "@"] describe-obj 
-		[:examine "@"] describe-obj [:take "@"] take-item [:drop "@"] drop-item
+		[:examine "@"] describe-obj [:take "@"] take-item [:drop "@"] drop-item [:upgrade "@"] upgrade [:eat "@"] eat
+		[:use "@"] hack
 			])  ;; add your other functions here
 
 ;; # Parsing
@@ -284,29 +370,76 @@
 ;; </code></pre>
 
 (def init-map
-  {:foyer {:desc "The walls are freshly painted but do not have any pictures.  You get the feeling it was just created for a game or something."
-           :title "in the foyer"
-           :dir {:south :grue-pen}
-           :contents #{:raw-egg}}
-   :grue-pen {:desc "It is very dark.  You are about to be eaten by a grue."
-              :title "in the grue pen"
-              :dir {:north :foyer}
-              :contents #{:raw-egg}}
+  {:nasa-lobby {:desc "NASA's administrator, Jim Bridenstine, turns towards you, Bill Gates. He says that you must hack the incoming asteroid in order to save all of mankind. You must find a computer. "
+           :title "in the lobby of NASA's headquarters"
+           :dir {:east :computer-room :west :bathroom :north :jims-office}
+           :contents #{}}
+    :jims-office {:desc "This is where NASA's administrator administrates."
+    	   :title "in Jim's office"
+           :dir {:south :nasa-lobby :east :jims-closet}
+           :contents #{}}
+   :jims-closet {:desc "You encounter a green alien from Mars. It offers you a Snickers."
+    	   :title "in Jim's closet"
+           :dir {:south :nasa-lobby :west :jims-office}
+           :contents #{:snickers}}
+   :bathroom {:desc "You thought there would be space-age tech, but it's a normal bathroom. You notice a usb drive on the sink."
+              :title "in the bathroom"
+              :dir {:east :nasa-lobby}
+              :contents #{:urinal-cake :usb}}
+    :computer-room {:desc "There are three computers to choose from."
+              :title "in the computer room"
+              :dir {:west :nasa-lobby :east :hacking-station :south :closet}
+              :contents #{:mac :windows-vista :windows-xp}}
+    :closet {:desc "It's pretty dusty in here"
+              :title "in the computer room"
+              :dir {:north :computer-room}
+              :contents #{}}
+    :hacking-station {:desc "This is a nice room to hack in."
+              :title "in the hacking station"
+              :dir {:west :computer-room :north :party-room }
+              :contents #{}}
+    :party-room {:desc "You saved humanity! Have a cake to celebrate. "
+				:title "in the party room"
+				:dir {:south :hacking-station}
+			    :contents #{:cake}
+				:key :ten-dollars}
    })
 
 (def init-adventurer
-  {:location :foyer
-   :inventory #{:usb}
-   :hp 10
-   :lives 3
+  {:location :nasa-lobby
+   :inventory #{}
    :tick 0
    :seen #{}})
 
    (def init-items
- {:raw-egg {:desc "This is a raw egg.  You probably want to cook it before eating it."
-            :name "a raw egg" }
-   :usb {:desc "This is a USB drive. Use to download Windows 10."
-            :name "a USB drive" }})
+ {
+   :usb {:desc "This is a Windows 10 USB drive. Use to install Windows 10."
+         :name "a Windows 10 USB drive" }
+   :urinal-cake {:desc "This is a urinal-cake"
+         :name "a urinal cake" 
+         :actions :eat}
+    :cake {:desc "This is a triple-layered chocolate cake"
+         :name "a cake" 
+         :actions :eat}
+   :windows-vista {:desc "This is a Windows Vista computer. Please upgrade to windows 10."
+         :name "a Windows Vista computer" 
+         :actions :upgrade}
+   :windows-xp {:desc "This is a Windows XP computer. Your company does not support this version anymore. Please upgrade to Windows 10."
+         :name "a Windows XP computer" 
+         :actions :upgrade}
+    :mac {:desc "This is a Mac computer. Filthy."
+         :name "a Mac computer" 
+         :actions :use}
+    :windows-10 {:desc "This is a Windows 10 computer. You can hack the asteroid with this."
+				:name "a Windows 10 computer"
+				:actions :use}
+	:snickers {:desc "This is a snickers bar the alien gave to you. It's glowing."
+				:name "a Snickers bar"
+				:actions :eat}			
+	:ten-dollars {:desc "10 dollars from Jim."
+				:name "ten dollars"
+				}		
+            })
 
 (defn main
   "Start the REPL with the initial environment."
@@ -317,14 +450,6 @@
 
 
 
-(defn status [state]
-  (let [location (get-in state [:adventurer :location])
-        the-map (:map state)]
-    (println location)
-    (print (str "You are " (-> the-map location :title) ". "))
-    (when-not ((get-in state [:adventurer :seen]) location)
-      (print (-> the-map location :desc)))
-    (update-in state [:adventurer :seen] #(conj % location))))
 
 (defn -main
   "Initialize the adventure"
@@ -333,5 +458,4 @@
     (let [pl (status local-state) 
           _  (println " What do you want to do?")
           command (read-line)]
-
       (recur (react pl (canonicalize command)) ))))
